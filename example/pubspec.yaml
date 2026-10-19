@@ -1,0 +1,21 @@
+name: example
+description: "pusk_list demo: a chat with animated inserts and removals and jumps to any message."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  pusk_list: { path: ../ }
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  pusk_lints: ^1.0.0
+
+flutter:
+  uses-material-design: true
