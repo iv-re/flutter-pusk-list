@@ -555,7 +555,8 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
   ///
   /// That is the first item starting inside the viewport, so an item cut by
   /// the viewport's leading edge grows or shrinks off-screen instead of
-  /// moving what the user is looking at. At the start edge it is item 0, so
+  /// moving what the user is looking at (except in a top-to-bottom list, see
+  /// [_cutIndexFor]). At the start edge it is item 0, so
   /// a growing first item (e.g. a streamed chat message) pushes the content.
   /// When no item starts inside the viewport but the end of the list is
   /// above its trailing edge (e.g. the list is scrolled past), it is
@@ -578,6 +579,31 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     while (index + 1 < _extents.length && _isRemoved(index)) {
       index++;
     }
+    return index;
+  }
+
+  /// The item cut by the viewport's leading edge whose own extent changes
+  /// are not compensated for, or -1.
+  ///
+  /// Content usually grows towards the visual bottom (appended text,
+  /// expanded details), so in a top-to-bottom list such an item keeps its
+  /// top in place: its visible part stays still and grows downwards, as in
+  /// a reversed list, where the anchor already keeps the visual top of an
+  /// item cut by the bottom edge. Inserted, removed and resizing neighbour
+  /// items are still compensated for, so their transitions stay off-screen.
+  int _cutIndexFor(double scrollOffset, int anchorIndex) {
+    final direction = applyGrowthDirectionToAxisDirection(
+      constraints.axisDirection,
+      constraints.growthDirection,
+    );
+    if (direction != AxisDirection.down || anchorIndex == 0) return -1;
+    final index = _extents.indexAt(scrollOffset);
+    if (index >= anchorIndex ||
+        _extents.offsetOf(index) >= scrollOffset - _kCorrectionTolerance) {
+      return -1;
+    }
+    final key = _keys[index];
+    if (_animations.containsKey(key) || _resizes.containsKey(key)) return -1;
     return index;
   }
 
@@ -654,6 +680,7 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     // Items before this one changing their extent shift the visible content,
     // so they are compensated for.
     final anchorIndex = _anchorIndexFor(scrollOffset);
+    final cutIndex = _cutIndexFor(scrollOffset, anchorIndex);
     final startIndex = _extents.indexAt(cacheStart);
     final childConstraints = constraints.asBoxConstraints();
 
@@ -713,7 +740,9 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
         extent = _resizedExtent(index, extent, offset, scrollOffset);
       }
       if (!_extents.isMeasured(index) || _extents[index] != extent) {
-        if (index < anchorIndex) correction += extent - _extents[index];
+        if (index < anchorIndex && index != cutIndex) {
+          correction += extent - _extents[index];
+        }
         _extents.setMeasured(index, extent);
         extentCache?[_keys[index]] = fullExtent;
       }

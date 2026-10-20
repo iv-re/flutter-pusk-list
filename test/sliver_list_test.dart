@@ -297,6 +297,29 @@ void main() {
       }
     });
 
+    testWidgets('an item cut by the top edge grows downwards', (tester) async {
+      final harness = GlobalKey<_HarnessState>();
+      final scrollController = ScrollController();
+      await tester.pumpWidget(
+        _Harness(
+          key: harness,
+          items: _items(100),
+          scrollController: scrollController,
+        ),
+      );
+      scrollController.jumpTo(80);
+      await tester.pump();
+      expect(_rect(tester, 'item-1').top, -30);
+
+      // Its visible part must not move while it keeps growing.
+      for (var height = 70.0; height <= 400; height += 20) {
+        harness.currentState!.update((items) => items[1].height = height);
+        await tester.pump();
+        expect(_rect(tester, 'item-1').top, -30);
+        expect(_rect(tester, 'item-2').top, height - 30);
+      }
+    });
+
     testWidgets('reuses measured extents through the cache', (tester) async {
       final cache = PuskExtentCache();
       final items = _items(100, height: (i) => 30.0 + i);
@@ -1053,7 +1076,7 @@ void main() {
       expect(_rect(tester, 'item-30').top, 0);
     });
 
-    testWidgets('the last item cut by the leading edge grows off-screen', (
+    testWidgets('the last item cut by the top edge grows downwards', (
       tester,
     ) async {
       final above = _items(20, prefix: 'a');
@@ -1083,7 +1106,8 @@ void main() {
 
       setState(() => above.last.height = 150);
       await tester.pump();
-      expect(_rect(tester, 'item-0').top, before);
+      expect(_rect(tester, 'a-19').top, -25);
+      expect(_rect(tester, 'item-0').top, before + 100);
     });
   });
 

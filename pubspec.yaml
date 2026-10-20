@@ -1,6 +1,6 @@
 name: pusk_list
 description: Flutter list with key-based scroll anchoring, jumps to any item and built-in insert/remove animations.
-version: 0.1.0
+version: 0.1.1
 repository: https://github.com/iv-re/flutter-pusk-list
 homepage: https://github.com/iv-re/flutter-pusk-list
 issue_tracker: https://github.com/iv-re/flutter-pusk-list/issues
