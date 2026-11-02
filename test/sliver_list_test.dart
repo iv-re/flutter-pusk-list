@@ -158,6 +158,27 @@ void main() {
       expect(_rect(tester, 'item-400').center.dy, moreOrLessEquals(300));
     });
 
+    testWidgets('lands on the end in the first frame when overestimated', (
+      tester,
+    ) async {
+      final items = _items(100);
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: PuskList(
+            estimatedExtent: 300,
+            // The padding keeps the viewport from clamping a wrong offset.
+            padding: const EdgeInsets.only(bottom: 100),
+            initialPosition: const PuskPosition(index: 99, alignment: 1),
+            itemCount: items.length,
+            itemKey: (index) => items[index].id,
+            itemBuilder: (context, index) => _Tile(items[index]),
+          ),
+        ),
+      );
+      expect(_rect(tester, 'item-99').bottom, moreOrLessEquals(600));
+    });
+
     testWidgets('animates to a key while items are inserted above it', (
       tester,
     ) async {
@@ -1191,6 +1212,53 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(controller.visibleRange.value, (first: 1, last: 9));
+    });
+
+    testWidgets('lands on the initial position over the trailing padding', (
+      tester,
+    ) async {
+      const insets = EdgeInsets.only(bottom: 100);
+      final items = _items(100);
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: PuskList(
+            padding: insets,
+            obscuredInsets: insets,
+            initialPosition: const PuskPosition(index: 99, alignment: 1),
+            itemCount: items.length,
+            itemKey: (index) => items[index].id,
+            itemBuilder: (context, index) => _Tile(items[index]),
+          ),
+        ),
+      );
+      expect(_rect(tester, 'item-99').bottom, moreOrLessEquals(500));
+    });
+
+    testWidgets('lands on the initial position over the slivers after it', (
+      tester,
+    ) async {
+      final items = _items(100);
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: CustomScrollView(
+            slivers: [
+              PuskSliverList(
+                obscuredInsets: const EdgeInsets.only(bottom: 100),
+                initialPosition: const PuskPosition(index: 99, alignment: 1),
+                itemCount: items.length,
+                itemKey: (index) => items[index].id,
+                itemBuilder: (context, index) => _Tile(items[index]),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 100)),
+            ],
+          ),
+        ),
+      );
+      // What follows the list is known after the first frame.
+      await tester.pump();
+      expect(_rect(tester, 'item-99').bottom, moreOrLessEquals(500));
     });
 
     Widget withHeader(

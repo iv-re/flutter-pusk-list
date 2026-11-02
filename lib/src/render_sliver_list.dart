@@ -639,6 +639,34 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     invokeLayoutCallback<SliverConstraints>((_) => visitChildren(visit));
   }
 
+  /// Lays out [child] at [index] and [offset], records the extent it takes in
+  /// the list and returns how much that extent changed.
+  double _layoutChild(
+    RenderBox child,
+    BoxConstraints childConstraints,
+    int index,
+    double offset,
+    double scrollOffset,
+  ) {
+    child.layout(childConstraints, parentUsesSize: true);
+    final fullExtent = _extentOf(child);
+    var extent = _animations.isEmpty
+        ? fullExtent
+        : _displayedExtent(index, fullExtent);
+    if (_resizes.isNotEmpty || _changedRanges != null) {
+      extent = _resizedExtent(index, extent, offset, scrollOffset);
+    }
+    var change = 0.0;
+    if (!_extents.isMeasured(index) || _extents[index] != extent) {
+      change = extent - _extents[index];
+      _extents.setMeasured(index, extent);
+      extentCache?[_keys[index]] = fullExtent;
+    }
+    (child.parentData! as SliverMultiBoxAdaptorParentData).layoutOffset =
+        offset;
+    return change;
+  }
+
   @override
   void performLayout() {
     _relayoutSeparatorsOnDirectionChange();
@@ -731,24 +759,15 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     var index = indexOf(child);
     var offset = _extents.offsetOf(index);
     while (true) {
-      child.layout(childConstraints, parentUsesSize: true);
-      final fullExtent = _extentOf(child);
-      var extent = _animations.isEmpty
-          ? fullExtent
-          : _displayedExtent(index, fullExtent);
-      if (_resizes.isNotEmpty || _changedRanges != null) {
-        extent = _resizedExtent(index, extent, offset, scrollOffset);
-      }
-      if (!_extents.isMeasured(index) || _extents[index] != extent) {
-        if (index < anchorIndex && index != cutIndex) {
-          correction += extent - _extents[index];
-        }
-        _extents.setMeasured(index, extent);
-        extentCache?[_keys[index]] = fullExtent;
-      }
-      (child.parentData! as SliverMultiBoxAdaptorParentData).layoutOffset =
-          offset;
-      offset += extent;
+      final change = _layoutChild(
+        child,
+        childConstraints,
+        index,
+        offset,
+        scrollOffset,
+      );
+      if (index < anchorIndex && index != cutIndex) correction += change;
+      offset += _extents[index];
 
       if (offset >= cacheEnd || index + 1 >= itemCount) break;
       var next = childAfter(child);
@@ -764,7 +783,6 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
       index++;
     }
     final lastLaidOut = child;
-    final endOffset = offset;
 
     var trailingGarbage = 0;
     for (var c = childAfter(lastLaidOut); c != null; c = childAfter(c)) {
@@ -781,7 +799,9 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
       return;
     }
 
+    // The jump may have measured items before the laid out ones.
     final startOffset = childScrollOffset(firstChild!)!;
+    final endOffset = _extents.offsetOf(indexOf(lastLaidOut) + 1);
     final paintExtent = calculatePaintOffset(
       constraints,
       from: startOffset,
@@ -836,18 +856,60 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
       _jumpTarget = null;
       return null;
     }
-    final correction =
-        _clampToContent(_alignedOffset(target)) -
-        _unclampedScrollOffset(scrollOffset);
     final isLaidOut =
         target.index >= indexOf(firstChild!) &&
         target.index <= indexOf(lastChild!);
+    if (isLaidOut) _measureItemsBefore(target, scrollOffset);
+    final aligned = _alignedOffset(target);
+    final clamped = _clampToContent(aligned);
+    final correction = clamped - _unclampedScrollOffset(scrollOffset);
     _jumpRefinements++;
-    if ((isLaidOut && correction.abs() <= _kCorrectionTolerance) ||
-        _jumpRefinements >= _kMaxJumpRefinements) {
+    if (_jumpRefinements >= _kMaxJumpRefinements) {
       _jumpTarget = null;
+    } else if (isLaidOut && correction.abs() <= _kCorrectionTolerance) {
+      if (clamped < aligned - _kCorrectionTolerance &&
+          _scrollPosition?.hasContentDimensions == false) {
+        // Slivers after this one may let the target go further; they are
+        // known once this layout is done.
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (attached && _jumpTarget == target) markNeedsLayout();
+        });
+      } else {
+        _jumpTarget = null;
+      }
     }
     return correction;
+  }
+
+  /// Measures the items before the laid out ones that the layout at [target]
+  /// will reach, so that their extents don't move the target once more.
+  void _measureItemsBefore(_JumpTarget target, double scrollOffset) {
+    final childConstraints = constraints.asBoxConstraints();
+    var measured = false;
+    while (indexOf(firstChild!) > 0) {
+      final index = indexOf(firstChild!) - 1;
+      final cacheStart =
+          _clampToContent(_alignedOffset(target)) + constraints.cacheOrigin;
+      if (_extents.offsetOf(index + 1) <= cacheStart) break;
+      final child = insertAndLayoutLeadingChild(
+        childConstraints,
+        parentUsesSize: true,
+      );
+      if (child == null) break;
+      _layoutChild(
+        child,
+        childConstraints,
+        index,
+        _extents.offsetOf(index),
+        scrollOffset,
+      );
+      measured = true;
+    }
+    if (!measured) return;
+    for (var c = firstChild; c != null; c = childAfter(c)) {
+      (c.parentData! as SliverMultiBoxAdaptorParentData).layoutOffset = _extents
+          .offsetOf(indexOf(c));
+    }
   }
 
   /// A jump's [correction] is already kept within the scrollable content
@@ -970,10 +1032,14 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     }
     final preceding = constraints.precedingScrollExtent;
     if (!position.hasContentDimensions) {
-      // First layout: what follows this sliver is unknown yet.
+      // First layout: of what follows this sliver, only the padding around
+      // it is known yet.
       return offset.clamp(
         -preceding,
-        math.max<double>(-preceding, _extents.total - viewportExtent),
+        math.max<double>(
+          -preceding,
+          _extents.total + _paddingAfter - viewportExtent,
+        ),
       );
     }
     final min = position.minScrollExtent - preceding;
@@ -984,6 +1050,20 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     );
     final max = _extents.total + following - viewportExtent;
     return offset.clamp(min, math.max(min, max));
+  }
+
+  /// Padding after this sliver from the [RenderSliverEdgeInsetsPadding]s
+  /// around it (e.g. [PuskList.padding]).
+  double get _paddingAfter {
+    var extent = 0.0;
+    for (
+      var node = parent;
+      node != null && node is! RenderViewportBase;
+      node = node.parent
+    ) {
+      if (node is RenderSliverEdgeInsetsPadding) extent += node.afterPadding;
+    }
+    return extent;
   }
 
   /// [scrollOffset] without the clamp to zero: negative while this sliver
