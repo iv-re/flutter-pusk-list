@@ -1,6 +1,6 @@
 part of 'sliver_list.dart';
 
-/// Controls a [PuskSliverList]: jumps and animations to items, visibility.
+/// Controls a `PuskSliverList`: jumps and animations to items, visibility.
 ///
 /// ```dart
 /// final controller = PuskListController();
@@ -21,7 +21,7 @@ class PuskListController {
   _RenderPuskSliverList? _render;
   final ValueNotifier<PuskVisibleRange?> _visibleRange = ValueNotifier(null);
 
-  /// Whether the controller is attached to a [PuskSliverList].
+  /// Whether the controller is attached to a `PuskSliverList`.
   bool get isAttached => _render != null;
 
   void _attach(_RenderPuskSliverList render) {
@@ -131,6 +131,10 @@ class PuskListController {
 
   int? indexOfKey(Object key) => _render?.indexOfKey(key);
 
+  /// Distance from the start of the list to the item at [index], from
+  /// measured and estimated extents.
+  double? offsetOf(int index) => _render?.offsetOf(index);
+
   /// Extent of the item at [index]: measured if it was laid out, estimated
   /// otherwise.
   double? extentOf(int index) => _render?.extentOf(index);
@@ -140,6 +144,48 @@ class PuskListController {
 
   /// Sum of all item extents (measured or estimated).
   double get estimatedScrollExtent => _render?.totalExtent ?? 0;
+
+  // ---------------------------------------------------------------------------
+  // Holding an item
+  //
+  // For dragging items with your own gestures: the caller moves the held
+  // item and changes the data. `reorder` is built on these.
+
+  /// Holds the visible item with [key]: it stays where it is on screen,
+  /// over the other items, when the list scrolls or changes, until
+  /// [releaseHeldItem]. Returns `false` if the item isn't laid out or an
+  /// item is already held.
+  ///
+  /// While it is held, items that change their place (e.g. the held item
+  /// moved to a new place in the data) slide there over
+  /// [moveDuration] with [moveCurve], and the items it passes don't shift
+  /// the screen. Items that change their extent (e.g. gaining a separator)
+  /// animate it the same way, until the held item lands.
+  bool holdItem(
+    Object key, {
+    Duration moveDuration = const Duration(milliseconds: 250),
+    Curve moveCurve = Curves.ease,
+  }) => _attached.holdItem(
+    key,
+    moveDuration: moveDuration,
+    moveCurve: moveCurve,
+  );
+
+  /// The held item and where it is, as of the last layout.
+  PuskHeldItem? get heldItem => _render?.heldItem;
+
+  /// Moves the held item by a pointer's [delta] (global coordinates) along
+  /// the list's axis, and across it too if [crossAxis] is on. The item is
+  /// clipped by the viewport.
+  void moveHeldItem(Offset delta, {bool crossAxis = false}) =>
+      _render?.moveHeldItem(delta, crossAxis: crossAxis);
+
+  /// Lets the held item go: it moves from where it is to its place in the
+  /// list over [duration] with [curve].
+  void releaseHeldItem({
+    Duration duration = const Duration(milliseconds: 250),
+    Curve curve = Curves.ease,
+  }) => _render?.releaseHeldItem(duration: duration, curve: curve);
 
   void dispose() {
     _disposed = true;

@@ -12,110 +12,14 @@ import 'package:pusk_list/src/types.dart';
 
 part 'controller.dart';
 part 'item_animation.dart';
-part 'pusk_list.dart';
 part 'render_sliver_list.dart';
 part 'scroll_to_item_activity.dart';
 part 'separated.dart';
 
-/// A sliver list with key-based scroll anchoring and fast jumps to any item.
-///
-/// Every item is identified by [itemKey]. When the list changes, existing
-/// items keep their elements and measured extents, and the first visible
-/// item stays where it was on screen (see [anchoring]).
-///
-/// ```dart
-/// CustomScrollView(
-///   reverse: true,
-///   slivers: [
-///     PuskSliverList(
-///       controller: controller,
-///       itemCount: messages.length,
-///       itemKey: (index) => messages[index].id,
-///       itemBuilder: (context, index) => MessageTile(messages[index]),
-///       estimatedExtent: 80,
-///       transition: const PuskItemTransition.sizeFade(),
-///     ),
-///   ],
-/// )
-/// ```
-class PuskSliverList extends SliverMultiBoxAdaptorWidget {
-  PuskSliverList({
-    required int itemCount,
-    required PuskItemKeyBuilder itemKey,
-    required IndexedWidgetBuilder itemBuilder,
-    PuskListController? controller,
-    double estimatedExtent = 100,
-    PuskExtentEstimator? extentEstimator,
-    PuskPosition? initialPosition,
-    PuskAnchoring anchoring = const PuskAnchoring(),
-    PuskExtentCache? extentCache,
-    PuskItemTransition? transition,
-    EdgeInsets obscuredInsets = EdgeInsets.zero,
-    bool addAutomaticKeepAlives = true,
-    bool addRepaintBoundaries = true,
-    bool addSemanticIndexes = true,
-    Key? key,
-  }) : this._(
-         itemCount: itemCount,
-         itemKey: itemKey,
-         itemBuilder: itemBuilder,
-         controller: controller,
-         estimatedExtent: estimatedExtent,
-         extentEstimator: extentEstimator,
-         initialPosition: initialPosition,
-         anchoring: anchoring,
-         extentCache: extentCache,
-         transition: transition,
-         obscuredInsets: obscuredInsets,
-         addAutomaticKeepAlives: addAutomaticKeepAlives,
-         addRepaintBoundaries: addRepaintBoundaries,
-         addSemanticIndexes: addSemanticIndexes,
-         key: key,
-       );
-
-  /// A list with a separator after every item but the last.
-  ///
-  /// `separatorBuilder(context, index)` builds the separator between the
-  /// items at `index` and `index + 1`. The separator is a part of the item:
-  /// it is counted in the item's extent and appears, disappears and
-  /// animates together with it.
-  PuskSliverList.separated({
-    required int itemCount,
-    required PuskItemKeyBuilder itemKey,
-    required IndexedWidgetBuilder itemBuilder,
-    required IndexedWidgetBuilder separatorBuilder,
-    PuskListController? controller,
-    double estimatedExtent = 100,
-    PuskExtentEstimator? extentEstimator,
-    PuskPosition? initialPosition,
-    PuskAnchoring anchoring = const PuskAnchoring(),
-    PuskExtentCache? extentCache,
-    PuskItemTransition? transition,
-    EdgeInsets obscuredInsets = EdgeInsets.zero,
-    bool addAutomaticKeepAlives = true,
-    bool addRepaintBoundaries = true,
-    bool addSemanticIndexes = true,
-    Key? key,
-  }) : this._(
-         itemCount: itemCount,
-         itemKey: itemKey,
-         itemBuilder: itemBuilder,
-         separatorBuilder: separatorBuilder,
-         controller: controller,
-         estimatedExtent: estimatedExtent,
-         extentEstimator: extentEstimator,
-         initialPosition: initialPosition,
-         anchoring: anchoring,
-         extentCache: extentCache,
-         transition: transition,
-         obscuredInsets: obscuredInsets,
-         addAutomaticKeepAlives: addAutomaticKeepAlives,
-         addRepaintBoundaries: addRepaintBoundaries,
-         addSemanticIndexes: addSemanticIndexes,
-         key: key,
-       );
-
-  PuskSliverList._({
+/// The list itself, behind `PuskSliverList` (which documents the
+/// parameters). Not exported: only the library's widgets build it.
+class PuskRawSliverList extends SliverMultiBoxAdaptorWidget {
+  PuskRawSliverList({
     required this.itemCount,
     required this.itemKey,
     required IndexedWidgetBuilder itemBuilder,
@@ -130,8 +34,8 @@ class PuskSliverList extends SliverMultiBoxAdaptorWidget {
     required bool addAutomaticKeepAlives,
     required bool addRepaintBoundaries,
     required bool addSemanticIndexes,
-    required super.key,
     IndexedWidgetBuilder? separatorBuilder,
+    super.key,
   }) : assert(itemCount >= 0),
        assert(estimatedExtent >= 0),
        super(
@@ -147,43 +51,14 @@ class PuskSliverList extends SliverMultiBoxAdaptorWidget {
        );
 
   final int itemCount;
-
-  /// Unique, stable key of the item at an index: an id, a string, anything
-  /// with a meaningful `==` and `hashCode`.
   final PuskItemKeyBuilder itemKey;
-
   final PuskListController? controller;
-
-  /// Extent assumed for items that haven't been laid out yet.
   final double estimatedExtent;
-
-  /// Per-item estimate, used instead of [estimatedExtent] when given.
-  ///
-  /// Called for items as they are added to the list. Changing the callback
-  /// doesn't re-estimate existing items.
   final PuskExtentEstimator? extentEstimator;
-
-  /// Position to show on the first layout.
   final PuskPosition? initialPosition;
-
   final PuskAnchoring anchoring;
-
-  /// Measured extents to reuse across list instances.
   final PuskExtentCache? extentCache;
-
-  /// How items appear and disappear; `null` applies changes immediately.
-  ///
-  /// Removed items keep their element while they animate out: the item
-  /// builder is never called for them.
   final PuskItemTransition? transition;
-
-  /// Parts of the viewport covered by other widgets, e.g. a translucent app
-  /// bar or an input field over the list.
-  ///
-  /// Jumps align items within the rest of the viewport, and items entirely
-  /// under these insets aren't visible. Pinned headers before the list are
-  /// accounted for automatically. The insets are physical (`top` is the top
-  /// in a reversed list too) and add no space: use padding for that.
   final EdgeInsets obscuredInsets;
 
   @override
@@ -368,7 +243,7 @@ class _PuskChildDelegate extends SliverChildDelegate {
 typedef _Removed = ({Object key, int oldIndex});
 
 class _PuskSliverListElement extends SliverMultiBoxAdaptorElement {
-  _PuskSliverListElement(PuskSliverList super.widget)
+  _PuskSliverListElement(PuskRawSliverList super.widget)
     : _itemKeys = KeysDiff.initial(widget.itemCount, widget.itemKey) {
     _keys = _itemKeys;
   }
@@ -396,7 +271,7 @@ class _PuskSliverListElement extends SliverMultiBoxAdaptorElement {
       super.renderObject as _RenderPuskSliverList;
 
   _PuskChildDelegate get _delegate =>
-      (widget as PuskSliverList).delegate as _PuskChildDelegate;
+      (widget as PuskRawSliverList).delegate as _PuskChildDelegate;
 
   int _itemIndexOf(int displayIndex) =>
       displayIndex - _countBelow(_removedIndices, displayIndex);
@@ -452,7 +327,7 @@ class _PuskSliverListElement extends SliverMultiBoxAdaptorElement {
 
   /// Brings the displayed keys in line with the widget's items.
   void _reconcile() {
-    final widget = this.widget as PuskSliverList;
+    final widget = this.widget as PuskRawSliverList;
     final animate = widget.transition != null;
     final hadRemovals = _removedIndices.isNotEmpty;
     final oldItemKeys = _itemKeys;
@@ -512,10 +387,11 @@ class _PuskSliverListElement extends SliverMultiBoxAdaptorElement {
     _finishedRemovals.clear();
 
     // New index of the first item in old display indices [from, to) that is
-    // still there.
+    // still there and didn't move elsewhere.
     int? firstRemainingIn(int from, int to) {
       for (var i = from; i < to; i++) {
         final int? newIndex;
+        if (diff != null && diff.isMoved(oldKeys[i])) continue;
         if (_contains(oldRemovedIndices, i)) {
           // A removed item that came back or is dropped now.
           newIndex = diff?.newBlockIndexOf(oldKeys[i]);

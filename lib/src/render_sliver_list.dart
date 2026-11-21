@@ -90,6 +90,13 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
   /// removals.
   final Map<Object, _ItemResize> _resizes = HashMap<Object, _ItemResize>();
 
+  /// Slides of visible items that changed their place.
+  final Map<Object, _ItemMove> _moves = HashMap<Object, _ItemMove>();
+
+  /// Where items were on screen (relative to the scroll offset) before the
+  /// updates since the last layout, when an item moved.
+  Map<Object, double>? _moveOrigins;
+
   /// Display index ranges `[start, end)` changed by the last update. Until
   /// the next completed layout, visible items that change their extent
   /// animate it.
@@ -130,7 +137,10 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     if (_transition == value) return;
     _transition = value;
     // Removed items are dropped by the element when transitions turn off.
-    if (value == null) _finishInsertAnimations();
+    if (value == null) {
+      _finishInsertAnimations();
+      _moves.clear();
+    }
     if (!(value?.animateSize ?? false)) _resizes.clear();
     markNeedsLayout();
   }
@@ -178,6 +188,8 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     }
     _animations.clear();
     _resizes.clear();
+    _moves.clear();
+    _held = null;
     super.dispose();
   }
 
@@ -200,6 +212,8 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     final oldLength = diff.oldKeys.length;
     final newLength = diff.newKeys.length;
 
+    final displaced = _displacedByHeldItem(diff);
+
     // Find the anchor and its current offset before touching the extents.
     final oldAnchor = math.min(_anchorIndex, oldLength);
     int? newAnchor;
@@ -209,16 +223,30 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
         newAnchor = oldAnchor + diff.delta;
         oldAnchorOffset = _extents.offsetOf(oldAnchor);
       } else if (oldAnchor >= diff.start) {
-        newAnchor = diff.newBlockIndexOf(diff.oldKeys[oldAnchor]);
-        if (newAnchor != null) {
-          oldAnchorOffset = _extents.offsetOf(oldAnchor);
-        } else if (diff.oldEnd < oldLength) {
-          // The anchor is gone: keep the first item after the block in place.
+        // The first item from the anchor on that is still there and didn't
+        // move: a moved anchor goes elsewhere, the screen stays.
+        for (var i = oldAnchor; i < diff.oldEnd; i++) {
+          final key = diff.oldKeys[i];
+          final index = diff.newBlockIndexOf(key);
+          if (index != null &&
+              !diff.isMoved(key) &&
+              !(displaced?.contains(key) ?? false)) {
+            newAnchor = index;
+            oldAnchorOffset = _extents.offsetOf(i);
+            break;
+          }
+        }
+        if (newAnchor == null && diff.oldEnd < oldLength) {
+          // Nothing stays: keep the first item after the block in place.
           newAnchor = diff.newEnd;
           oldAnchorOffset = _extents.offsetOf(diff.oldEnd);
         }
       }
       // An anchor before the block doesn't move.
+    }
+
+    if (_hasLaidOut && _moveTiming != null && diff.hasMoves) {
+      _recordMoveOrigins(diff);
     }
 
     final blockLength = diff.newEnd - diff.start;
@@ -284,6 +312,239 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
       return true;
     });
   }
+
+  /// Remembers where the items that may change their place on screen are,
+  /// before [diff] applies: the block, which has the moved items, and the
+  /// items around the screen, which the anchor correction may shift.
+  ///
+  /// Positions are kept from the first of several updates before a layout:
+  /// that is what is on screen.
+  void _recordMoveOrigins(KeysDiff diff) {
+    final origins = _moveOrigins ??= HashMap<Object, double>();
+    final scrollOffset = _lastScrollOffset + _pendingCorrection;
+    final paintExtent = _lastPaintExtent;
+    void record(int from, int to) {
+      var offset = _extents.offsetOf(from);
+      for (var i = from; i < to; i++) {
+        origins.putIfAbsent(_keys[i], () => offset - scrollOffset);
+        offset += _extents[i];
+      }
+    }
+
+    record(
+      _extents.indexAt(scrollOffset - paintExtent),
+      _extents.indexAt(scrollOffset + 2 * paintExtent) + 1,
+    );
+    record(diff.start, diff.oldEnd);
+  }
+
+  /// Makes the laid out items that changed their place on screen since
+  /// [_recordMoveOrigins] slide there from where they were.
+  ///
+  /// Items next to animated insertions and removals don't change their
+  /// place: those animate their extent instead.
+  void _startMoves(double scrollOffset) {
+    final origins = _moveOrigins;
+    if (origins == null) return;
+    _moveOrigins = null;
+    final timing = _moveTiming;
+    if (timing == null) return;
+    final held = _held;
+    final paintExtent = constraints.remainingPaintExtent;
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      final index = indexOf(child);
+      final key = _keys[index];
+      final origin = origins[key];
+      if (origin == null) continue;
+      // Follows the pointer.
+      if (held != null && !held.released && held.key == key) continue;
+      final start = childScrollOffset(child)! - scrollOffset;
+      // Still in its place (maybe sliding there from an earlier move).
+      if ((origin - start).abs() <= _kCorrectionTolerance) continue;
+      final extent = _extents[index];
+      final move = _moves[key];
+      var from = origin + (move?.offset ?? 0);
+      final wasVisible = from < paintExtent && from + extent > 0;
+      final isVisible = start < paintExtent && start + extent > 0;
+      if (!wasVisible && !isVisible) {
+        _moves.remove(key);
+        continue;
+      }
+      // An item coming from far away enters from the edge.
+      if (!wasVisible) from = from < 0 ? -extent : paintExtent;
+      final shift = from - start;
+      if (shift.abs() <= _kCorrectionTolerance) {
+        _moves.remove(key);
+      } else if (move != null) {
+        move.restart(shift, timing.duration, timing.curve);
+      } else {
+        _moves[key] = _ItemMove(
+          from: shift,
+          duration: timing.duration,
+          curve: timing.curve,
+        );
+      }
+    }
+    _updateTicker();
+  }
+
+  /// How items that change their place move: as given for the held item
+  /// while there is one, as set by the transition otherwise.
+  ({Duration duration, Curve curve})? get _moveTiming {
+    final held = _held;
+    if (held != null) {
+      if (held.moveDuration <= Duration.zero) return null;
+      return (duration: held.moveDuration, curve: held.moveCurve);
+    }
+    final transition = _transition;
+    if (transition == null || transition.moveDuration <= Duration.zero) {
+      return null;
+    }
+    return (duration: transition.moveDuration, curve: transition.moveCurve);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Holding an item
+
+  /// The held item, until it lands after its release.
+  _HeldItem? _held;
+
+  RenderBox? _childOfKey(Object key) {
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      if (_keys[indexOf(child)] == key) return child;
+    }
+    return null;
+  }
+
+  /// Where this sliver starts along the viewport's main axis (after the
+  /// slivers before it that are still visible).
+  double get _paintOrigin =>
+      constraints.viewportMainAxisExtent - constraints.remainingPaintExtent;
+
+  bool holdItem(
+    Object key, {
+    required Duration moveDuration,
+    required Curve moveCurve,
+  }) {
+    if (!_hasLaidOut || (_held != null && !_held!.released)) return false;
+    _landHeldItem();
+    final child = _childOfKey(key);
+    if (child == null || _isRemoved(indexOf(child))) return false;
+    final position = childMainAxisPosition(child) + _paintOrigin;
+    _moves.remove(key);
+    _held = _HeldItem(
+      key: key,
+      position: position,
+      moveDuration: moveDuration,
+      moveCurve: moveCurve,
+    );
+    markNeedsPaint();
+    return true;
+  }
+
+  void moveHeldItem(Offset delta, {required bool crossAxis}) {
+    final held = _held;
+    if (held == null || held.released) return;
+    final (main, cross) = switch (applyGrowthDirectionToAxisDirection(
+      constraints.axisDirection,
+      constraints.growthDirection,
+    )) {
+      AxisDirection.down => (delta.dy, delta.dx),
+      AxisDirection.up => (-delta.dy, delta.dx),
+      AxisDirection.right => (delta.dx, delta.dy),
+      AxisDirection.left => (-delta.dx, delta.dy),
+    };
+    held.position += main;
+    if (crossAxis) held.cross += cross;
+    markNeedsPaint();
+  }
+
+  void releaseHeldItem({required Duration duration, required Curve curve}) {
+    final held = _held;
+    if (held == null || held.released) return;
+    held.released = true;
+    final child = _childOfKey(held.key);
+    if (child != null && duration > Duration.zero) {
+      final slot = childScrollOffset(child)! - constraints.scrollOffset;
+      final shift = held.position - _paintOrigin - slot;
+      if (shift.abs() > _kCorrectionTolerance) {
+        _moves[held.key] = _ItemMove(
+          from: shift,
+          duration: duration,
+          curve: curve,
+        );
+      }
+      if (held.cross != 0) {
+        held.crossMove = _ItemMove(
+          from: held.cross,
+          duration: duration,
+          curve: curve,
+        );
+      }
+    }
+    if (_isLanding(held)) {
+      _updateTicker();
+    } else {
+      _landHeldItem();
+    }
+    markNeedsPaint();
+  }
+
+  bool _isLanding(_HeldItem held) =>
+      (held.crossMove?.isRunning ?? false) || _moves.containsKey(held.key);
+
+  void _landHeldItem() {
+    final held = _held;
+    if (held == null || !held.released) return;
+    _held = null;
+    _moves.remove(held.key);
+    markNeedsPaint();
+  }
+
+  /// Items that make room for the held item shift by its extent: none of
+  /// them may keep the screen in place.
+  Set<Object>? _displacedByHeldItem(KeysDiff diff) {
+    final held = _held;
+    if (held == null || held.released) return null;
+    final key = held.key;
+    final from = _keyIndexMap[key];
+    if (from == null) return null;
+    final to = diff.newIndexOf(from);
+    if (to == null || to == from) return null;
+    final keys = diff.newKeys;
+    final last = math.min(math.max(from, to), keys.length - 1);
+    final displaced = HashSet<Object>()..add(key);
+    for (var i = math.min(from, to); i <= last; i++) {
+      displaced.add(keys[i]);
+    }
+    return displaced;
+  }
+
+  PuskHeldItem? get heldItem {
+    final held = _held;
+    if (held == null || held.released || !_hasLaidOut) return null;
+    final index = _keyIndexMap[held.key];
+    if (index == null) return null;
+    final scrollOffset = constraints.scrollOffset;
+    final area = _visibleArea(scrollOffset);
+    return PuskHeldItem(
+      key: held.key,
+      index: _itemIndexOf(index),
+      leadingEdge: scrollOffset + held.position - _paintOrigin,
+      extent: _extents[index],
+      visibleStart: area.start,
+      visibleEnd: area.end,
+    );
+  }
+
+  /// Display indices by key, removed items included.
+  Map<Object, int> get _keyIndexMap => _keyIndex ??= () {
+    final map = HashMap<Object, int>();
+    for (var i = 0; i < _keys.length; i++) {
+      map[_keys[i]] = i;
+    }
+    return map;
+  }();
 
   /// Starts insert animations for new items that land in the visible part
   /// of the list, [scrollShift] being the correction the change causes.
@@ -410,7 +671,10 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
       return resize.extent;
     }
     final ranges = _changedRanges;
-    if (ranges == null ||
+    // While an item is held, extents change with the order (e.g. the
+    // separator of the item that becomes or stops being the last one).
+    final heldTiming = ranges == null ? _moveTiming : null;
+    if ((ranges == null && (_held == null || heldTiming == null)) ||
         _animations.containsKey(key) ||
         !_extents.isMeasured(index)) {
       return extent;
@@ -424,9 +688,10 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     _resizes[key] = _ItemResize(
       from: old,
       to: extent,
-      pinLeading: _pinsLeading(index, ranges),
-      duration: _resizeDuration,
-      curve: _resizeCurve,
+      // A separator is on the trailing side.
+      pinLeading: ranges == null || _pinsLeading(index, ranges),
+      duration: heldTiming?.duration ?? _resizeDuration,
+      curve: heldTiming?.curve ?? _resizeCurve,
     );
     _updateTicker();
     return old;
@@ -452,6 +717,8 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
 
   void _updateTicker() {
     final running =
+        _moves.isNotEmpty ||
+        (_held?.released ?? false) ||
         _resizes.values.any((r) => r.isRunning) ||
         _animations.values.any((a) => a.isRunning);
     if (!running || !attached) {
@@ -495,6 +762,17 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     }
     // Finished resizes are dropped by the next layout, which stores their
     // final extent.
+    if (_moves.isNotEmpty) {
+      _moves.removeWhere((_, move) {
+        move.tick(delta);
+        return !move.isRunning;
+      });
+    }
+    final held = _held;
+    if (held != null && held.released) {
+      held.crossMove?.tick(delta);
+      if (!_isLanding(held)) _landHeldItem();
+    }
     var resized = false;
     for (final resize in _resizes.values) {
       if (resize.isRunning) {
@@ -653,7 +931,7 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     var extent = _animations.isEmpty
         ? fullExtent
         : _displayedExtent(index, fullExtent);
-    if (_resizes.isNotEmpty || _changedRanges != null) {
+    if (_resizes.isNotEmpty || _changedRanges != null || _held != null) {
       extent = _resizedExtent(index, extent, offset, scrollOffset);
     }
     var change = 0.0;
@@ -937,6 +1215,7 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     _lastScrollOffset = scrollOffset;
     _lastPaintExtent = constraints.remainingPaintExtent;
     _lastScrollExtent = geometry!.scrollExtent;
+    _startMoves(scrollOffset);
     _anchorIndex = _anchorIndexFor(scrollOffset);
     _updateVisibleRange(scrollOffset);
   }
@@ -1053,7 +1332,7 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
   }
 
   /// Padding after this sliver from the [RenderSliverEdgeInsetsPadding]s
-  /// around it (e.g. [PuskList.padding]).
+  /// around it (e.g. `PuskList.padding`).
   double get _paddingAfter {
     var extent = 0.0;
     for (
@@ -1196,6 +1475,10 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
 
   double get totalExtent => _extents.total;
 
+  double? offsetOf(int itemIndex) => itemIndex >= 0 && itemIndex < itemCount
+      ? _extents.offsetOf(_displayIndexOf(itemIndex))
+      : null;
+
   double? extentOf(int itemIndex) => itemIndex >= 0 && itemIndex < itemCount
       ? _extents[_displayIndexOf(itemIndex)]
       : null;
@@ -1206,14 +1489,7 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
       _extents.isMeasured(_displayIndexOf(itemIndex));
 
   int? indexOfKey(Object key) {
-    final map = _keyIndex ??= () {
-      final map = HashMap<Object, int>();
-      for (var i = 0; i < _keys.length; i++) {
-        map[_keys[i]] = i;
-      }
-      return map;
-    }();
-    final index = map[key];
+    final index = _keyIndexMap[key];
     if (index == null || _isRemoved(index)) return null;
     return _itemIndexOf(index);
   }
@@ -1315,26 +1591,49 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
 
   @override
   double childMainAxisPosition(RenderBox child) {
-    final position = childScrollOffset(child)! - constraints.scrollOffset;
-    if (_animations.isEmpty && _resizes.isEmpty) return position;
+    var position = childScrollOffset(child)! - constraints.scrollOffset;
+    if (_animations.isEmpty &&
+        _resizes.isEmpty &&
+        _moves.isEmpty &&
+        _held == null) {
+      return position;
+    }
     final index = indexOf(child);
-    final resize = _resizes[_keys[index]];
+    final key = _keys[index];
+    final held = _held;
+    if (held != null && !held.released && held.key == key) {
+      return held.position - _paintOrigin;
+    }
+    if (_moves.isNotEmpty) position += _moves[key]?.offset ?? 0;
+    final resize = _resizes[key];
     if (resize != null && resize.pinLeading) return position;
-    if (resize == null && _animations[_keys[index]] == null) return position;
+    if (resize == null && _animations[key] == null) return position;
     return position + _extents[index] - _extentOf(child);
+  }
+
+  @override
+  double childCrossAxisPosition(RenderBox child) {
+    final held = _held;
+    if (held == null || _keys[indexOf(child)] != held.key) return 0;
+    return held.released ? held.crossMove?.offset ?? 0 : held.cross;
   }
 
   @override
   void paint(PaintingContext context, Offset offset) {
     if (firstChild == null) return;
-    if (_animations.isEmpty && _resizes.isEmpty) {
+    final held = _held;
+    if (_animations.isEmpty &&
+        _resizes.isEmpty &&
+        _moves.isEmpty &&
+        held == null) {
       super.paint(context, offset);
       return;
     }
     // Same as the superclass, but animated items are faded, and painted
     // first: an item that doesn't fit its slot yet sticks out towards the
     // leading edge, under its neighbour (or past the viewport's edge), with
-    // no clip of its own.
+    // no clip of its own. Moving items are painted last, over the items
+    // they pass.
     final Offset mainAxisUnit;
     final Offset crossAxisUnit;
     final Offset originOffset;
@@ -1364,14 +1663,19 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
         originOffset = offset + Offset(geometry!.paintExtent, 0);
         reversed = true;
     }
-    for (final animated in const [true, false]) {
+    for (final layer in _PaintLayer.values) {
       for (var child = firstChild; child != null; child = childAfter(child)) {
         final index = indexOf(child);
         final key = _keys[index];
         final animation = _animations[key];
-        if ((animation != null || _resizes.containsKey(key)) != animated) {
-          continue;
-        }
+        final childLayer = held?.key == key
+            ? _PaintLayer.held
+            : _moves.containsKey(key)
+            ? _PaintLayer.moving
+            : animation != null || _resizes.containsKey(key)
+            ? _PaintLayer.resizing
+            : _PaintLayer.still;
+        if (childLayer != layer) continue;
         final mainAxisDelta = childMainAxisPosition(child);
         final extent = paintExtentOf(child);
         if (mainAxisDelta >= constraints.remainingPaintExtent ||
@@ -1427,7 +1731,11 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     required double mainAxisPosition,
     required double crossAxisPosition,
   }) {
-    if (_animations.isEmpty && _resizes.isEmpty) {
+    final held = _held;
+    if (_animations.isEmpty &&
+        _resizes.isEmpty &&
+        _moves.isEmpty &&
+        held == null) {
       return super.hitTestChildren(
         result,
         mainAxisPosition: mainAxisPosition,
@@ -1435,7 +1743,35 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
       );
     }
     final boxResult = BoxHitTestResult.wrap(result);
+    // The held item and moving items are painted over the others.
+    final heldChild = held == null ? null : _childOfKey(held.key);
+    if (heldChild != null &&
+        hitTestBoxChild(
+          boxResult,
+          heldChild,
+          mainAxisPosition: mainAxisPosition,
+          crossAxisPosition: crossAxisPosition,
+        )) {
+      return true;
+    }
     for (var child = lastChild; child != null; child = childBefore(child)) {
+      if (child == heldChild) continue;
+      if (!_moves.containsKey(_keys[indexOf(child)])) continue;
+      if (_animationOfChild(child)?.isRemoving ?? false) continue;
+      if (hitTestBoxChild(
+        boxResult,
+        child,
+        mainAxisPosition: mainAxisPosition,
+        crossAxisPosition: crossAxisPosition,
+      )) {
+        return true;
+      }
+    }
+    for (var child = lastChild; child != null; child = childBefore(child)) {
+      if (child == heldChild ||
+          (_moves.isNotEmpty && _moves.containsKey(_keys[indexOf(child)]))) {
+        continue;
+      }
       if (_isAnimating(child)) {
         // Items that are going away can't be interacted with.
         if (_animationOfChild(child)?.isRemoving ?? false) continue;
@@ -1468,3 +1804,6 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     }
   }
 }
+
+/// Paint order of items, back to front.
+enum _PaintLayer { resizing, still, moving, held }

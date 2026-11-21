@@ -114,7 +114,7 @@ class _ItemAnimation extends Animation<double>
 /// animates. It is pinned to the edge away from the change ([pinLeading]),
 /// so that the part that appeared or went away is the one sliding under its
 /// neighbour.
-class _ItemResize {
+class _ItemResize with _Progress {
   _ItemResize({
     required this.from,
     required this.to,
@@ -126,13 +126,11 @@ class _ItemResize {
   double from;
   double to;
   final bool pinLeading;
+  @override
   Duration duration;
   Curve curve;
-  double _progress = 0;
 
   double get extent => from + (to - from) * curve.transform(_progress);
-
-  bool get isRunning => _progress < 1;
 
   /// Animates from the current extent to [target] over a full duration.
   void retarget(double target) {
@@ -140,6 +138,64 @@ class _ItemResize {
     to = target;
     _progress = 0;
   }
+}
+
+/// Slide of an item that changed its place: it is laid out at its new place
+/// and painted [offset] pixels (along the main axis) away from it, from
+/// where it was, the offset running down to zero.
+class _ItemMove with _Progress {
+  _ItemMove({required this.from, required this.duration, required this.curve});
+
+  double from;
+  @override
+  Duration duration;
+  Curve curve;
+
+  double get offset => from * (1 - curve.transform(_progress));
+
+  /// Starts over from [offset] with a full duration.
+  void restart(double offset, Duration duration, Curve curve) {
+    from = offset;
+    this.duration = duration;
+    this.curve = curve;
+    _progress = 0;
+  }
+}
+
+/// An item held in place on screen (e.g. dragged by the user) until it is
+/// released and lands at its place in the list.
+class _HeldItem {
+  _HeldItem({
+    required this.key,
+    required this.position,
+    required this.moveDuration,
+    required this.moveCurve,
+  });
+
+  final Object key;
+
+  /// Position of the item's leading edge along the viewport's main axis
+  /// while it is held: it doesn't move when the list scrolls.
+  double position;
+
+  /// Offset across the main axis.
+  double cross = 0;
+
+  /// How other items move while this one is held.
+  final Duration moveDuration;
+  final Curve moveCurve;
+
+  /// Whether the item was released; it then lands as a move.
+  bool released = false;
+  _ItemMove? crossMove;
+}
+
+/// Linear progress over [duration], advanced by the list's ticker.
+mixin _Progress {
+  Duration get duration;
+  double _progress = 0;
+
+  bool get isRunning => _progress < 1;
 
   void tick(Duration elapsed) {
     final micros = duration.inMicroseconds;

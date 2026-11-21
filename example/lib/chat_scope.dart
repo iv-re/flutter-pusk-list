@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:example/chat_data.dart';
 import 'package:flutter/widgets.dart';
 import 'package:pusk_list/pusk_list.dart';
@@ -18,6 +20,13 @@ class ChatModel extends ChangeNotifier {
 
   void remove(Message message) {
     messages.remove(message);
+    notifyListeners();
+  }
+
+  /// Shuffles the messages from [first] to [last] inclusive.
+  void shuffle(int first, int last, Random random) {
+    final range = messages.sublist(first, last + 1)..shuffle(random);
+    messages.setRange(first, last + 1, range);
     notifyListeners();
   }
 

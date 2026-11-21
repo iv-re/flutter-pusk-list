@@ -109,6 +109,67 @@ class KeysDiff {
     return map[key];
   }
 
+  /// Whether the item with [key] moved: it is in the block before and after
+  /// the change, but not in the largest group of such items that kept their
+  /// order (those only shift as other items come, go or move around them).
+  bool isMoved(Object key) => (_moved ??= _findMoved()).contains(key);
+
+  /// Whether any item moved (see [isMoved]).
+  bool get hasMoves => (_moved ??= _findMoved()).isNotEmpty;
+
+  Set<Object>? _moved;
+
+  Set<Object> _findMoved() {
+    // Items present before and after, in old order, with their new indices.
+    final keys = <Object>[];
+    final newIndices = <int>[];
+    for (var i = start; i < oldEnd; i++) {
+      final newIndex = newBlockIndexOf(oldKeys[i]);
+      if (newIndex != null) {
+        keys.add(oldKeys[i]);
+        newIndices.add(newIndex);
+      }
+    }
+    final count = keys.length;
+    if (count < 2) return const {};
+
+    // Longest increasing subsequence of the new indices (patience sorting):
+    // `tails[l]` is the position of the smallest tail of a run of length
+    // `l + 1`, `previous` links each position to the one before it.
+    final tails = <int>[];
+    final previous = List<int>.filled(count, -1);
+    for (var i = 0; i < count; i++) {
+      final value = newIndices[i];
+      var low = 0;
+      var high = tails.length;
+      while (low < high) {
+        final mid = (low + high) >> 1;
+        if (newIndices[tails[mid]] < value) {
+          low = mid + 1;
+        } else {
+          high = mid;
+        }
+      }
+      if (low > 0) previous[i] = tails[low - 1];
+      if (low == tails.length) {
+        tails.add(i);
+      } else {
+        tails[low] = i;
+      }
+    }
+    if (tails.length == count) return const {};
+
+    final kept = List<bool>.filled(count, false);
+    for (var i = tails.last; i >= 0; i = previous[i]) {
+      kept[i] = true;
+    }
+    final moved = HashSet<Object>();
+    for (var i = 0; i < count; i++) {
+      if (!kept[i]) moved.add(keys[i]);
+    }
+    return moved;
+  }
+
   /// Where the item at [oldIndex] ended up, or `null` if it was removed.
   int? newIndexOf(int oldIndex) {
     if (oldIndex < start) return oldIndex;

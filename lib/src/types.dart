@@ -97,6 +97,37 @@ class PuskItemPosition {
       '$leadingEdge → $trailingEdge)';
 }
 
+/// An item held with `PuskListController.holdItem`, as of the last
+/// layout.
+///
+/// Positions are distances from the start of the list along its axis, like
+/// `PuskListController.offsetOf`.
+@immutable
+class PuskHeldItem {
+  const PuskHeldItem({
+    required this.key,
+    required this.index,
+    required this.leadingEdge,
+    required this.extent,
+    required this.visibleStart,
+    required this.visibleEnd,
+  });
+
+  final Object key;
+
+  /// Index of the item's place in the list.
+  final int index;
+
+  /// Where the item is shown (not its place in the list).
+  final double leadingEdge;
+  final double extent;
+
+  /// The part of the list visible in the viewport, without
+  /// `obscuredInsets` and pinned headers.
+  final double visibleStart;
+  final double visibleEnd;
+}
+
 /// Wraps an item in its insert/remove transition.
 ///
 /// [key] is the item's key (from `itemKey`), also for a removed item that
@@ -138,6 +169,11 @@ typedef PuskItemTransitionBuilder =
 /// message that gains its author's name when the one above it is deleted)
 /// animate it too. Other extent changes, like streamed text, apply
 /// immediately.
+///
+/// Visible items that change their place (items reordered by key) slide
+/// from where they were, over the items they pass. An item that moves out
+/// of the built part of the list disappears at once, while the room it
+/// leaves closes smoothly.
 @immutable
 class PuskItemTransition {
   /// The item's space opens (or closes) while the item fades in (or out)
@@ -153,6 +189,8 @@ class PuskItemTransition {
     this.removeDuration = const Duration(milliseconds: 350),
     this.insertCurve = Curves.ease,
     this.removeCurve = Curves.ease,
+    this.moveDuration = const Duration(milliseconds: 350),
+    this.moveCurve = Curves.ease,
     this.fadeStart = 0,
   }) : assert(fadeStart >= 0 && fadeStart < 1),
        builder = null,
@@ -168,6 +206,8 @@ class PuskItemTransition {
     this.removeDuration = const Duration(milliseconds: 350),
     this.insertCurve = Curves.ease,
     this.removeCurve = Curves.ease,
+    this.moveDuration = const Duration(milliseconds: 350),
+    this.moveCurve = Curves.ease,
   }) : fade = false,
        fadeStart = 0;
 
@@ -178,6 +218,11 @@ class PuskItemTransition {
   /// Applied to the time of the removal, like [insertCurve]: the default
   /// starts fast and settles, so the space closes without a jerk at the end.
   final Curve removeCurve;
+
+  /// How long a visible item that changes its place takes to get there.
+  /// [Duration.zero] puts it there immediately.
+  final Duration moveDuration;
+  final Curve moveCurve;
 
   /// Whether the extent of items animates.
   final bool animateSize;
@@ -198,6 +243,8 @@ class PuskItemTransition {
       other.removeDuration == removeDuration &&
       other.insertCurve == insertCurve &&
       other.removeCurve == removeCurve &&
+      other.moveDuration == moveDuration &&
+      other.moveCurve == moveCurve &&
       other.animateSize == animateSize &&
       other.fade == fade &&
       other.fadeStart == fadeStart &&
@@ -209,6 +256,8 @@ class PuskItemTransition {
     removeDuration,
     insertCurve,
     removeCurve,
+    moveDuration,
+    moveCurve,
     animateSize,
     fade,
     fadeStart,

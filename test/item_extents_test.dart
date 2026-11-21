@@ -117,6 +117,30 @@ void main() {
       expect(d.newIndexOf(3), isNull);
     });
 
+    test('a moved item is the one out of order', () {
+      final d = diff(['a', 'b', 'c', 'd', 'e'], ['a', 'c', 'd', 'b', 'e'])!;
+      expect(
+        [for (final k in 'abcde'.split('')) d.isMoved(k)],
+        [
+          false,
+          true,
+          false,
+          false,
+          false,
+        ],
+      );
+    });
+
+    test('insertions and removals are not moves', () {
+      final d = diff(['a', 'b', 'c', 'd'], ['x', 'a', 'c', 'y', 'd'])!;
+      expect(d.hasMoves, isFalse);
+    });
+
+    test('a reversed block keeps one item in place', () {
+      final d = diff(['a', 'b', 'c', 'd'], ['d', 'c', 'b', 'a'])!;
+      expect(['a', 'b', 'c', 'd'].where(d.isMoved), hasLength(3));
+    });
+
     test('rejects duplicate keys', () {
       expect(
         () => KeysDiff.initial(2, (_) => 'same'),

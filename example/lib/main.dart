@@ -5,7 +5,8 @@ import 'package:example/chat_data.dart';
 import 'package:example/chat_scope.dart';
 import 'package:example/message_tile.dart';
 import 'package:example/perf_hud.dart';
-import 'package:flutter/material.dart';
+import 'package:example/reorder_demo.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:pusk_list/pusk_list.dart';
 
 void main() => runApp(const DemoApp());
@@ -106,6 +107,13 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// Reorders the visible messages: they slide to their new places.
+  void _shuffleVisible() {
+    final range = _controller.visibleRange.value;
+    if (range == null || range.first == range.last) return;
+    _chat.shuffle(range.first, range.last, _random);
+  }
+
   void _toggleStats() {
     setState(() {
       _stats?.dispose();
@@ -151,6 +159,10 @@ class _ChatScreenState extends State<ChatScreen> {
         appBar: _ChatAppBar(
           onJump: _jumpToRandom,
           onBurst: _burst,
+          onShuffle: _shuffleVisible,
+          onReorderDemo: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const ReorderDemo()),
+          ),
           statsVisible: _stats != null,
           onToggleStats: _toggleStats,
         ),
@@ -193,12 +205,16 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   const _ChatAppBar({
     required this.onJump,
     required this.onBurst,
+    required this.onShuffle,
+    required this.onReorderDemo,
     required this.statsVisible,
     required this.onToggleStats,
   });
 
   final VoidCallback onJump;
   final VoidCallback onBurst;
+  final VoidCallback onShuffle;
+  final VoidCallback onReorderDemo;
   final bool statsVisible;
   final VoidCallback onToggleStats;
 
@@ -232,6 +248,20 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
               child: const ListTile(
                 leading: Icon(Icons.bolt_rounded),
                 title: Text('Burst of 20 messages'),
+              ),
+            ),
+            PopupMenuItem(
+              value: onShuffle,
+              child: const ListTile(
+                leading: Icon(Icons.swap_vert_rounded),
+                title: Text('Shuffle visible messages'),
+              ),
+            ),
+            PopupMenuItem(
+              value: onReorderDemo,
+              child: const ListTile(
+                leading: Icon(Icons.drag_handle_rounded),
+                title: Text('Reorder demo'),
               ),
             ),
             const PopupMenuDivider(),

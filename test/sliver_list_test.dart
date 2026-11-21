@@ -971,6 +971,227 @@ void main() {
     });
   });
 
+  group('moves', () {
+    const moving = PuskItemTransition.sizeFade(
+      insertDuration: Duration(milliseconds: 200),
+      removeDuration: Duration(milliseconds: 200),
+      moveDuration: Duration(milliseconds: 200),
+      insertCurve: Curves.linear,
+      removeCurve: Curves.linear,
+      moveCurve: Curves.linear,
+    );
+
+    void move(List<_Item> items, String id, int to) {
+      final item = items.firstWhere((item) => item.id == id);
+      items
+        ..remove(item)
+        ..insert(to, item);
+    }
+
+    testWidgets('a moved item slides over the items it passes', (
+      tester,
+    ) async {
+      final harness = GlobalKey<_HarnessState>();
+      await tester.pumpWidget(
+        _Harness(key: harness, items: _items(100), transition: moving),
+      );
+      final created = _createdTiles;
+
+      harness.currentState!.update((items) => move(items, 'item-2', 6));
+      await tester.pump();
+      expect(_rect(tester, 'item-2').top, 100);
+      expect(_rect(tester, 'item-3').top, 150);
+      expect(_rect(tester, 'item-7').top, 350);
+
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(_rect(tester, 'item-2').top, moreOrLessEquals(200));
+      expect(_rect(tester, 'item-5').top, moreOrLessEquals(225));
+      // Painted over the item it passes.
+      final hit = tester.hitTestOnBinding(const Offset(10, 240));
+      bool hits(String id) => hit.path.any(
+        (entry) =>
+            entry.target ==
+            tester.renderObject(find.byKey(ValueKey('tile-$id'))),
+      );
+      expect(hits('item-2'), isTrue);
+      expect(hits('item-5'), isFalse);
+
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(_rect(tester, 'item-2').top, 300);
+      expect(_rect(tester, 'item-3').top, 100);
+      expect(_createdTiles, created, reason: 'no tile should be recreated');
+    });
+
+    testWidgets('an item moved away from the screen lets the rest close up', (
+      tester,
+    ) async {
+      final harness = GlobalKey<_HarnessState>();
+      final controller = PuskListController();
+      await tester.pumpWidget(
+        _Harness(
+          key: harness,
+          items: _items(100),
+          controller: controller,
+          transition: moving,
+        ),
+      );
+      controller.jumpToIndex(20);
+      await tester.pump();
+
+      harness.currentState!.update((items) => move(items, 'item-25', 0));
+      await tester.pump();
+      expect(_rect(tester, 'item-20').top, 0);
+      expect(_rect(tester, 'item-26').top, 300);
+
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(_rect(tester, 'item-26').top, moreOrLessEquals(275));
+
+      await tester.pumpAndSettle();
+      expect(_rect(tester, 'item-20').top, 0);
+      expect(_rect(tester, 'item-26').top, 250);
+      expect(controller.indexOfKey('item-25'), 0);
+    });
+
+    testWidgets('moving the first visible item keeps the screen', (
+      tester,
+    ) async {
+      final harness = GlobalKey<_HarnessState>();
+      final controller = PuskListController();
+      await tester.pumpWidget(
+        _Harness(
+          key: harness,
+          items: _items(100),
+          controller: controller,
+          transition: moving,
+        ),
+      );
+      controller.jumpToIndex(20);
+      await tester.pump();
+
+      harness.currentState!.update((items) => move(items, 'item-20', 50));
+      await tester.pump();
+      expect(_rect(tester, 'item-21').top, 50);
+
+      await tester.pumpAndSettle();
+      expect(_rect(tester, 'item-21').top, 50);
+      expect(_rect(tester, 'item-19').top, 0);
+    });
+
+    testWidgets('an item moved into the screen enters from the edge', (
+      tester,
+    ) async {
+      final harness = GlobalKey<_HarnessState>();
+      await tester.pumpWidget(
+        _Harness(key: harness, items: _items(100), transition: moving),
+      );
+
+      harness.currentState!.update((items) => move(items, 'item-80', 4));
+      await tester.pump();
+      expect(_rect(tester, 'item-80').top, 600);
+      expect(_rect(tester, 'item-4').top, 200);
+
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(_rect(tester, 'item-80').top, moreOrLessEquals(400));
+
+      await tester.pumpAndSettle();
+      expect(_rect(tester, 'item-80').top, 200);
+      expect(_rect(tester, 'item-4').top, 250);
+    });
+
+    testWidgets('a reversed chat: a message moved to the latest slides down', (
+      tester,
+    ) async {
+      final harness = GlobalKey<_HarnessState>();
+      await tester.pumpWidget(
+        _Harness(
+          key: harness,
+          items: _items(100),
+          reverse: true,
+          transition: moving,
+        ),
+      );
+
+      harness.currentState!.update((items) => move(items, 'item-5', 0));
+      await tester.pump();
+      expect(_rect(tester, 'item-5').top, 300);
+      expect(_rect(tester, 'item-0').top, 550);
+
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(_rect(tester, 'item-5').top, moreOrLessEquals(425));
+      expect(_rect(tester, 'item-0').top, moreOrLessEquals(525));
+
+      await tester.pumpAndSettle();
+      expect(_rect(tester, 'item-5').top, 550);
+      expect(_rect(tester, 'item-0').top, 500);
+    });
+
+    testWidgets('a move during a move continues from where the item is', (
+      tester,
+    ) async {
+      final harness = GlobalKey<_HarnessState>();
+      await tester.pumpWidget(
+        _Harness(key: harness, items: _items(100), transition: moving),
+      );
+
+      harness.currentState!.update((items) => move(items, 'item-2', 6));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(_rect(tester, 'item-2').top, moreOrLessEquals(200));
+
+      harness.currentState!.update((items) => move(items, 'item-2', 0));
+      await tester.pump();
+      expect(_rect(tester, 'item-2').top, moreOrLessEquals(200));
+
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(_rect(tester, 'item-2').top, moreOrLessEquals(100));
+
+      await tester.pumpAndSettle();
+      expect(_rect(tester, 'item-2').top, 0);
+      expect(_rect(tester, 'item-0').top, 50);
+    });
+
+    testWidgets('a zero move duration moves at once', (tester) async {
+      final harness = GlobalKey<_HarnessState>();
+      await tester.pumpWidget(
+        _Harness(
+          key: harness,
+          items: _items(100),
+          transition: const PuskItemTransition.sizeFade(
+            moveDuration: Duration.zero,
+          ),
+        ),
+      );
+
+      harness.currentState!.update((items) => move(items, 'item-2', 6));
+      await tester.pump();
+      expect(_rect(tester, 'item-2').top, 300);
+      expect(_rect(tester, 'item-3').top, 100);
+    });
+
+    testWidgets('a removed item next to a moved one stays in its place', (
+      tester,
+    ) async {
+      final harness = GlobalKey<_HarnessState>();
+      await tester.pumpWidget(
+        _Harness(key: harness, items: _items(100), transition: moving),
+      );
+
+      harness.currentState!.update((items) {
+        items.removeAt(3);
+        move(items, 'item-4', 8);
+      });
+      await tester.pump();
+      // item-3 animates out where it was, item-4 slides down from its place.
+      expect(_rect(tester, 'item-3').top, 150);
+      expect(_rect(tester, 'item-4').top, 200);
+
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('tile-item-3')), findsNothing);
+      expect(_rect(tester, 'item-5').top, 150);
+      expect(_rect(tester, 'item-4').top, 400);
+    });
+  });
+
   group('next to other slivers', () {
     Widget scrollView(
       List<Widget> slivers, {

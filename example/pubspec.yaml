@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
 
+  material_ui: ^1.11.1
   pusk_list: { path: ../ }
 
 dev_dependencies:

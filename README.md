@@ -16,21 +16,13 @@ PuskList(
 )
 ```
 
-`itemKey` must return a unique key per item that stays the same while the
-item exists: state, anchoring and animations follow it.
-
-- Items keep their state and measured extents across list changes.
-- The first visible item stays in place when items are inserted/removed
-  before it or change extent; at the start edge new items are shown instead
-  (`PuskAnchoring`).
+- `itemKey` must be unique and stable for the item's lifetime: state,
+  anchoring and animations follow it.
+- The first visible item stays in place when items before it change; at the
+  start edge new items are shown instead (`PuskAnchoring`).
 - `PuskExtentCache` keeps measured extents across list instances.
 
-`PuskList` takes the scroll view's parameters too (`padding`, `physics`,
-`scrollController`, ...).
-
 ## Slivers
-
-`PuskSliverList` is the same list for a `CustomScrollView`.
 
 ```dart
 CustomScrollView(
@@ -57,8 +49,7 @@ PuskList.separated(
 )
 ```
 
-`PuskSliverList.separated` is the same for slivers. Indices count items
-only: the separator after an item is a part of it.
+Indices count items only: the separator is a part of the item before it.
 
 ## Controller
 
@@ -71,29 +62,62 @@ await controller.animateToKey(id, duration: d, curve: Curves.easeInOut);
 controller.visibleRange; // ValueListenable<({int first, int last})?>
 ```
 
-`alignment` is relative to the viewport. If other widgets cover a part of it
-(e.g. a translucent app bar), pass `obscuredInsets`: jumps align items within
-the rest, and items entirely under the insets aren't visible. Pinned headers
-are accounted for automatically.
+If a translucent app bar or similar covers the list, pass `obscuredInsets`:
+jumps and visibility then use the uncovered part. Pinned headers are
+accounted for automatically.
 
 ## Transitions
 
 ```dart
-// Size + fade, done by the list itself.
 transition: const PuskItemTransition.sizeFade(),
 
-// Your own widgets; the list still animates the size.
-// `key` is the item key, also for removed items.
+// Own widgets; the list still animates the size. `key` is the item key.
 transition: PuskItemTransition.custom(
-  builder: (context, animation, key, child) => ScaleTransition(
-    scale: animation,
-    child: child,
-  ),
+  builder: (context, animation, key, child) {
+    return ScaleTransition(scale: animation, child: child);
+  },
 ),
 ```
 
-Only changes in the visible part of the list animate. A `custom` builder
-must return the same widget structure for any `animation`, or items lose
-their state when it starts or ends.
+- Only changes in the visible part animate.
+- Reordered items slide to their new places (`moveDuration`, `moveCurve`).
+- A `custom` builder must return the same structure for any `animation`,
+  or items lose their state.
 
-`example/` is a chat demo.
+## Reordering
+
+```dart
+PuskList(
+  itemCount: tasks.length,
+  itemKey: (index) => tasks[index].id,
+  itemBuilder: (context, index) => ListTile(
+    title: Text(tasks[index].title),
+    // PuskDragStartListener.delayed for a long press.
+    trailing: const PuskDragStartListener(child: Icon(Icons.drag_handle)),
+  ),
+  reorder: PuskReorder(
+    // `to` is the index after the move.
+    onReorder: (from, to) {
+      setState(() {
+        final task = tasks.removeAt(from);
+        tasks.insert(to, task);
+      });
+    },
+  ),
+)
+```
+
+- Change the order synchronously in `onReorder`, or the item slides back.
+- Switching `reorder` between `null` and a value rebuilds the items. For an
+  edit mode, keep it and show or hide the `PuskDragStartListener`s.
+- While dragging, `itemBuilder` and `separatorBuilder` get indices of the
+  unchanged list, the controller those of the list as shown. For what
+  depends on the neighbours (corners, dividers of a group), use
+  `PuskReorderItem.of(context)` inside the item: `index` as shown,
+  `sourceIndexAt(i)` for the item shown at `i`.
+- `decorator` must return the same structure for any animation.
+- The dragged item is clipped by the viewport.
+- Separators taking up space animate their appearance; draw them over the
+  item to keep heights fixed.
+
+`example/` has a chat demo and a reorder demo.
