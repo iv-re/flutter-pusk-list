@@ -110,13 +110,18 @@ PuskList(
 - Change the order synchronously in `onReorder`, or the item slides back.
 - Switching `reorder` between `null` and a value rebuilds the items. For an
   edit mode, keep it and show or hide the `PuskDragStartListener`s.
-- While dragging, `itemBuilder` and `separatorBuilder` get indices of the
-  unchanged list, the controller those of the list as shown. For what
+- While dragging, `itemBuilder` gets indices of the unchanged list, the
+  controller those of the list as shown. For what
   depends on the neighbours (corners, dividers of a group), use
   `PuskReorderItem.of(context)` inside the item: `index` as shown,
   `sourceIndexAt(i)` for the item shown at `i`.
 - `decorator` must return the same structure for any animation.
 - The dragged item is clipped by the viewport.
+- The dragged item's separator keeps its room, but isn't painted until
+  the item lands.
+- A separator belongs to the gap, not to the item: while dragging,
+  `separatorBuilder` gets the index of the gap. Separators of different
+  heights or looks therefore change on drop, once the data has.
 - Separators taking up space animate their appearance; draw them over the
   item to keep heights fixed.
 

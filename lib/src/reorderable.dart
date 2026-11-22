@@ -275,9 +275,6 @@ class PuskShownItems {
 
   Object key(int index) => _state.widget.itemKey(sourceIndex(index));
 
-  /// Whether the item shown at [index] is being dragged.
-  bool isDragged(int index) => _state._session?.to == index;
-
   Widget build(BuildContext context, int index) =>
       _state._buildItem(context, sourceIndex(index), index);
 }
@@ -484,14 +481,19 @@ class _PuskReorderLayerState extends State<PuskReorderLayer>
     }
   }
 
-  /// Where the held item belongs: after every item whose middle its leading
-  /// edge passed, counting in the list without it. Only places next to the
+  /// Where the held item belongs: at the last place whose leading edge is
+  /// less than half a step ahead of the item's. The step between two places
+  /// is the same both ways (an item and the separator between the two), so
+  /// the target can't flicker between them, also at the end of the list,
+  /// where the extents differ by a separator. Only places next to the
   /// visible part of the list count, so that the item stays laid out.
   int? _proposedTarget() {
     final controller = _controller;
     final held = controller.heldItem;
     if (held == null) return null;
-    final extent = held.extent;
+    final heldSlot = controller.settledSlotOf(held.index);
+    if (heldSlot == null) return null;
+    final extent = heldSlot.item;
     final low = held.visibleStart - extent;
     final position = held.leadingEdge.clamp(
       low,
@@ -499,19 +501,21 @@ class _PuskReorderLayerState extends State<PuskReorderLayer>
     );
     final count = controller.itemCount;
     var moves = 0;
+    var previous = heldSlot;
     for (var i = held.index + 1; i < count; i++) {
-      final offset = controller.offsetOf(i);
-      final itemExtent = controller.extentOf(i);
-      if (offset == null || itemExtent == null) break;
-      if (position <= offset - extent + itemExtent / 2) break;
+      final slot = controller.settledSlotOf(i);
+      if (slot == null) break;
+      final from = slot.start - previous.separator - extent;
+      final to = slot.start + slot.item - extent;
+      if (position <= (from + to) / 2) break;
+      previous = slot;
       moves++;
     }
     if (moves == 0) {
       for (var i = held.index - 1; i >= 0; i--) {
-        final offset = controller.offsetOf(i);
-        final itemExtent = controller.extentOf(i);
-        if (offset == null || itemExtent == null) break;
-        if (position >= offset + itemExtent / 2) break;
+        final slot = controller.settledSlotOf(i);
+        if (slot == null) break;
+        if (position >= slot.start + (slot.item + slot.separator) / 2) break;
         moves--;
       }
     }
@@ -540,9 +544,12 @@ class _PuskReorderLayerState extends State<PuskReorderLayer>
   double get _autoScrollSpeed {
     final held = _controller.heldItem;
     if (held == null) return 0;
+    final slot = _controller.settledSlotOf(held.index);
+    if (slot == null) return 0;
     final autoScroll = _reorder.autoScroll;
     final leading = held.visibleStart - held.leadingEdge;
-    final trailing = held.leadingEdge + held.extent - held.visibleEnd;
+    // The separator doesn't follow the pointer.
+    final trailing = held.leadingEdge + slot.item - held.visibleEnd;
     return autoScroll.speedAt(trailing + autoScroll.edgeExtent) -
         autoScroll.speedAt(leading + autoScroll.edgeExtent);
   }

@@ -160,7 +160,8 @@ class PuskListController {
   /// moved to a new place in the data) slide there over
   /// [moveDuration] with [moveCurve], and the items it passes don't shift
   /// the screen. Items that change their extent (e.g. gaining a separator)
-  /// animate it the same way, until the held item lands.
+  /// animate it the same way, until the held item lands. The held item's
+  /// separator keeps its room, but isn't painted.
   bool holdItem(
     Object key, {
     Duration moveDuration = const Duration(milliseconds: 250),
@@ -181,7 +182,8 @@ class PuskListController {
       _render?.moveHeldItem(delta, crossAxis: crossAxis);
 
   /// Lets the held item go: it moves from where it is to its place in the
-  /// list over [duration] with [curve].
+  /// list over [duration] with [curve]. It lands after [duration] even if it
+  /// is in its place already, so that changes made on release animate.
   void releaseHeldItem({
     Duration duration = const Duration(milliseconds: 250),
     Curve curve = Curves.ease,
@@ -191,4 +193,13 @@ class PuskListController {
     _disposed = true;
     _visibleRange.dispose();
   }
+}
+
+/// What the reorder layer needs to know about the places. Not exported.
+extension PuskReorderGeometry on PuskListController {
+  /// The place of the item at [index] once the resizes are over: where it
+  /// starts (like [offsetOf]), and the extents of the item itself and of the
+  /// separator after it.
+  ({double start, double item, double separator})? settledSlotOf(int index) =>
+      _render?.settledSlotOf(index);
 }

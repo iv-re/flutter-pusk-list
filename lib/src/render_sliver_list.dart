@@ -13,6 +13,11 @@ const int _kMaxJumpRefinements = 4;
 
 typedef _JumpTarget = ({int index, double alignment});
 
+class _ItemParentData extends SliverMultiBoxAdaptorParentData {
+  /// The child's [_RenderSeparated], in a list with separators.
+  _RenderSeparated? separated;
+}
+
 class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
   _RenderPuskSliverList({
     required _PuskSliverListElement super.childManager,
@@ -166,6 +171,13 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
   }
 
   @override
+  void setupParentData(RenderObject child) {
+    if (child.parentData is! _ItemParentData) {
+      child.parentData = _ItemParentData();
+    }
+  }
+
+  @override
   void attach(PipelineOwner owner) {
     super.attach(owner);
     _controller?._attach(this);
@@ -274,7 +286,13 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     _keys = diff.newKeys;
     _keyIndex = null;
     _remapAnimations(diff);
-    if (animateInserts) _armResizes([(diff.start, diff.newEnd)]);
+    // Just a new order while an item is held resizes like the moves, with
+    // their timing and the separators on the trailing side.
+    final reorders = _held != null && diff.onlyReorders;
+    _reordered = reorders ? (diff.start, diff.newEnd) : null;
+    if (animateInserts && !reorders) {
+      _armResizes([(diff.start, diff.newEnd)]);
+    }
 
     double anchorShift() =>
         newAnchor == null ? 0 : _extents.offsetOf(newAnchor) - oldAnchorOffset;
@@ -298,6 +316,22 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     }
 
     markNeedsLayout();
+  }
+
+  /// The items that got a new order under the held item, `[start, end)`,
+  /// until the layout that shows it.
+  (int, int)? _reordered;
+
+  /// Whether a change of the extent of the item at [index] is only separators
+  /// changing hands in a new order. Those keep their sum: scrolling to make
+  /// up for a part of it would shift the items after them. Not so for an item
+  /// measured for the first time: its estimate was off.
+  bool _changesHands(int index) {
+    final reordered = _reordered;
+    return reordered != null &&
+        index >= reordered.$1 &&
+        index < reordered.$2 &&
+        _extents.isMeasured(index);
   }
 
   void _remapAnimations(KeysDiff diff) {
@@ -438,6 +472,7 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
       moveDuration: moveDuration,
       moveCurve: moveCurve,
     );
+    _separatedOfKey(key)?.markNeedsPaint();
     markNeedsPaint();
     return true;
   }
@@ -467,13 +502,13 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     if (child != null && duration > Duration.zero) {
       final slot = childScrollOffset(child)! - constraints.scrollOffset;
       final shift = held.position - _paintOrigin - slot;
-      if (shift.abs() > _kCorrectionTolerance) {
-        _moves[held.key] = _ItemMove(
-          from: shift,
-          duration: duration,
-          curve: curve,
-        );
-      }
+      // Also without a shift: the order and the separators may change before
+      // the next layout, and animate only until the item lands.
+      _moves[held.key] = _ItemMove(
+        from: shift,
+        duration: duration,
+        curve: curve,
+      );
       if (held.cross != 0) {
         held.crossMove = _ItemMove(
           from: held.cross,
@@ -498,7 +533,22 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     if (held == null || !held.released) return;
     _held = null;
     _moves.remove(held.key);
+    _separatedOfKey(held.key)?.markNeedsPaint();
     markNeedsPaint();
+  }
+
+  bool _holds(_ItemParentData item) {
+    final held = _held;
+    final index = item.index;
+    return held != null &&
+        index != null &&
+        index < _keys.length &&
+        _keys[index] == held.key;
+  }
+
+  _RenderSeparated? _separatedOfKey(Object key) {
+    final child = _childOfKey(key);
+    return (child?.parentData as _ItemParentData?)?.separated;
   }
 
   /// Items that make room for the held item shift by its extent: none of
@@ -667,6 +717,7 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
       }
       if ((resize.to - extent).abs() > _kCorrectionTolerance) {
         resize.retarget(extent);
+        resize.keepsScroll |= _changesHands(index);
       }
       return resize.extent;
     }
@@ -690,6 +741,7 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
       to: extent,
       // A separator is on the trailing side.
       pinLeading: ranges == null || _pinsLeading(index, ranges),
+      keepsScroll: _changesHands(index),
       duration: heldTiming?.duration ?? _resizeDuration,
       curve: heldTiming?.curve ?? _resizeCurve,
     );
@@ -1037,6 +1089,10 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
     var index = indexOf(child);
     var offset = _extents.offsetOf(index);
     while (true) {
+      // Read first: the layout measures the item and drops a finished resize.
+      final keepsScroll =
+          _changesHands(index) ||
+          (_resizes[_keys[index]]?.keepsScroll ?? false);
       final change = _layoutChild(
         child,
         childConstraints,
@@ -1044,7 +1100,9 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
         offset,
         scrollOffset,
       );
-      if (index < anchorIndex && index != cutIndex) correction += change;
+      if (index < anchorIndex && index != cutIndex && !keepsScroll) {
+        correction += change;
+      }
       offset += _extents[index];
 
       if (offset >= cacheEnd || index + 1 >= itemCount) break;
@@ -1209,6 +1267,7 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
   void _didCompleteLayout(double scrollOffset) {
     _hasLaidOut = true;
     _changedRanges = null;
+    _reordered = null;
     // Finished resizes of items that weren't laid out.
     if (_resizes.isNotEmpty) _resizes.removeWhere((_, r) => !r.isRunning);
     _consecutiveCorrections = 0;
@@ -1482,6 +1541,26 @@ class _RenderPuskSliverList extends RenderSliverMultiBoxAdaptor {
   double? extentOf(int itemIndex) => itemIndex >= 0 && itemIndex < itemCount
       ? _extents[_displayIndexOf(itemIndex)]
       : null;
+
+  ({double start, double item, double separator})? settledSlotOf(
+    int itemIndex,
+  ) {
+    if (itemIndex < 0 || itemIndex >= itemCount) return null;
+    final index = _displayIndexOf(itemIndex);
+    final key = _keys[index];
+    final extent = _resizes[key]?.to ?? _extents[index];
+    var start = _extents.offsetOf(index);
+    for (final MapEntry(key: resized, value: resize) in _resizes.entries) {
+      final at = _keyIndexMap[resized];
+      if (at == null || at >= index) continue;
+      // Other resizes before the anchor scroll instead of moving what follows.
+      if (at < _anchorIndex && !resize.keepsScroll) continue;
+      start += resize.to - _extents[at];
+    }
+    final separated = _separatedOfKey(key);
+    final separator = separated?.separatorExtent ?? 0.0;
+    return (start: start, item: extent - separator, separator: separator);
+  }
 
   bool isMeasured(int itemIndex) =>
       itemIndex >= 0 &&

@@ -471,7 +471,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('separators follow the order while dragging, smoothly', (
+  testWidgets('separators stay in the gaps while dragging', (
     tester,
   ) async {
     final items = _ids(4);
@@ -505,24 +505,23 @@ void main() {
     final gesture = await tester.startGesture(_handle(tester, 'item-1'));
     await gesture.moveBy(const Offset(0, 20));
     await tester.pump();
-    // The dragged item goes without its separator; its place shrinks.
-    expect(find.byKey(const ValueKey('sep-item-1')), findsNothing);
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(controller.extentOf(1), moreOrLessEquals(55));
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(controller.extentOf(1), 50);
+    // The dragged item's place keeps its separator.
+    expect(find.byKey(const ValueKey('sep-item-1')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(controller.extentOf(1), 60);
 
     // To the last place: the former last item gets a separator.
     await gesture.moveBy(const Offset(0, 130));
     await tester.pump();
     expect(controller.indexOfKey('item-1'), 3);
-    expect(find.byKey(const ValueKey('sep-item-3')), findsOneWidget);
+    expect(find.byKey(const ValueKey('sep-item-3')), findsNothing);
+    expect(find.byKey(const ValueKey('sep-item-2')), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 100));
     expect(controller.extentOf(2), moreOrLessEquals(55));
     await tester.pump(const Duration(milliseconds: 100));
     expect(controller.extentOf(2), 60);
 
-    // Back in the middle after the drop: the separator returns, smoothly.
+    // Back in the middle: the drop changes no extents.
     await gesture.moveBy(const Offset(0, -80));
     await tester.pump();
     expect(controller.indexOfKey('item-1'), 2);
@@ -532,7 +531,7 @@ void main() {
     expect(items, ['item-0', 'item-2', 'item-1', 'item-3']);
     expect(find.byKey(const ValueKey('sep-item-1')), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 100));
-    expect(controller.extentOf(2), moreOrLessEquals(55));
+    expect(controller.extentOf(2), 60);
     await tester.pumpAndSettle();
     expect(controller.extentOf(2), 60);
     expect(controller.extentOf(3), 50);

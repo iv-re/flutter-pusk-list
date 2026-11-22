@@ -120,6 +120,8 @@ class PuskHeldItem {
 
   /// Where the item is shown (not its place in the list).
   final double leadingEdge;
+
+  /// Extent of the item's place, with its separator.
   final double extent;
 
   /// The part of the list visible in the viewport, without

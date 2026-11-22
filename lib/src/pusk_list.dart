@@ -136,9 +136,10 @@ class PuskSliverList extends StatelessWidget {
 
   /// Lets the user drag items to new places; see [PuskReorder].
   ///
-  /// While an item is dragged, [itemBuilder], [separatorBuilder] and
-  /// [extentEstimator] get indices of the unchanged list, and [controller]
-  /// those of the list as shown. Switching between `null` and a value
+  /// While an item is dragged, [itemBuilder] and [extentEstimator] get
+  /// indices of the unchanged list, [separatorBuilder] that of the gap (the
+  /// same gaps as without dragging), and [controller] indices of the list as
+  /// shown. Switching between `null` and a value
   /// rebuilds the items: to turn dragging on and off (e.g. an edit mode),
   /// keep it and show or hide the [PuskDragStartListener]s.
   final PuskReorder? reorder;
@@ -167,18 +168,13 @@ class PuskSliverList extends StatelessWidget {
       itemBuilder: itemBuilder,
       controller: controller,
       builder: (context, items, controller) {
-        final separator = separatorBuilder;
         final estimator = extentEstimator;
         return _raw(
           itemCount: items.count,
           itemKey: items.key,
           itemBuilder: items.build,
-          separatorBuilder: separator == null
-              ? null
-              // The dragged item goes without its separator.
-              : (context, index) => items.isDragged(index)
-                    ? const SizedBox.shrink()
-                    : separator(context, items.sourceIndex(index)),
+          // Not mapped: a separator belongs to the gap between two places.
+          separatorBuilder: separatorBuilder,
           extentEstimator: estimator == null
               ? null
               : (index) => estimator(items.sourceIndex(index)),

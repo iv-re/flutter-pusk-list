@@ -117,6 +117,15 @@ class KeysDiff {
   /// Whether any item moved (see [isMoved]).
   bool get hasMoves => (_moved ??= _findMoved()).isNotEmpty;
 
+  /// Whether the change only puts the same items in another order.
+  bool get onlyReorders {
+    if (oldEnd != newEnd) return false;
+    for (var i = start; i < newEnd; i++) {
+      if (oldBlockIndexOf(newKeys[i]) == null) return false;
+    }
+    return true;
+  }
+
   Set<Object>? _moved;
 
   Set<Object> _findMoved() {

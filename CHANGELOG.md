@@ -1,3 +1,12 @@
+## 0.3.0
+
+- Changed: while dragging, `separatorBuilder` gets the index of the gap.
+- Fixed: the dragged item's place keeps the room of its separator.
+- Fixed: `separatorBuilder` got an out-of-range index when dragging to the end.
+- Fixed: the drop target flickered at the last place of a separated list.
+- Fixed: changes on a drop right in the item's place didn't animate.
+- Fixed: items jumped by a separator when dragging to or from the end with a `transition`.
+
 ## 0.2.0
 
 - Drag-to-reorder: `reorder: PuskReorder(...)` on `PuskList` and `PuskSliverList`, with `PuskDragStartListener`.

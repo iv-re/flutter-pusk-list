@@ -119,6 +119,7 @@ class _ItemResize with _Progress {
     required this.from,
     required this.to,
     required this.pinLeading,
+    required this.keepsScroll,
     required this.duration,
     required this.curve,
   });
@@ -126,6 +127,9 @@ class _ItemResize with _Progress {
   double from;
   double to;
   final bool pinLeading;
+
+  /// Whether the scroll offset doesn't make up for it.
+  bool keepsScroll;
   @override
   Duration duration;
   Curve curve;
